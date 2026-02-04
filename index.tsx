@@ -1,11 +1,14 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { initializeSecurity, applySecurityHeaders } from "./security";
+import { initializeSecurity } from "./security";
 
 // Initialize government-grade security on app startup
 if (typeof document !== "undefined") {
-  applySecurityHeaders();
+  // Dynamically import applySecurityHeaders to avoid chunking issues
+  import("./security/securityHeaders").then(({ applySecurityHeaders }) => {
+    applySecurityHeaders();
+  });
   initializeSecurity();
 }
 

@@ -79,34 +79,50 @@ const TacticalMap: React.FC<TacticalMapProps> = ({
     }
   };
 
-  // Simulated Map Backgrounds
-  // Using tiling patterns for a continuous look
+  // Simulated Map Backgrounds - CSS patterns as primary (no external dependencies)
   const getBackgroundStyle = () => {
+    const baseStyle = {
+      backgroundColor: "#0f172a",
+    };
+
     switch (viewMode) {
       case "SATELLITE":
         return {
-          backgroundColor: "#0f172a",
-          backgroundImage: `url('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/12/1566/1171')`, // Sample tile
+          ...baseStyle,
+          backgroundImage: `
+            radial-gradient(ellipse at 20% 30%, rgba(30, 41, 59, 1) 0%, transparent 50%),
+            radial-gradient(ellipse at 80% 70%, rgba(15, 23, 42, 1) 0%, transparent 50%),
+            radial-gradient(ellipse at 50% 50%, rgba(51, 65, 85, 0.5) 0%, transparent 70%),
+            repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(71, 85, 105, 0.1) 20px),
+            repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(71, 85, 105, 0.1) 20px)
+          `,
           backgroundSize: "cover",
           backgroundPosition: "center",
-          filter: "grayscale(30%) contrast(1.2) brightness(0.6)",
         };
       case "GRID":
         return {
-          backgroundColor: "#0f172a",
-          backgroundImage:
-            "linear-gradient(#475569 1px, transparent 1px), linear-gradient(90deg, #475569 1px, transparent 1px)",
-          backgroundSize: "50px 50px",
+          ...baseStyle,
+          backgroundImage: `
+            linear-gradient(rgba(71, 85, 105, 0.4) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(71, 85, 105, 0.4) 1px, transparent 1px),
+            radial-gradient(circle at 50% 50%, rgba(51, 65, 85, 0.8) 0%, transparent 70%)
+          `,
+          backgroundSize: "50px 50px, 50px 50px, cover",
+          backgroundPosition: "center",
         };
       case "DARK":
       default:
         return {
-          backgroundColor: "#111",
-          // Dark Matter style simulation using a filtered tile or pattern
-          backgroundImage: `url('https://cartodb-basemaps-a.global.ssl.fastly.net/dark_all/12/1171/1566.png')`, // Sample DC tile
+          ...baseStyle,
+          backgroundImage: `
+            radial-gradient(ellipse at 15% 20%, rgba(14, 165, 233, 0.08) 0%, transparent 40%),
+            radial-gradient(ellipse at 85% 80%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+            radial-gradient(ellipse at 50% 50%, rgba(30, 41, 59, 0.9) 0%, transparent 60%),
+            repeating-linear-gradient(0deg, transparent, transparent 99px, rgba(71, 85, 105, 0.15) 100px),
+            repeating-linear-gradient(90deg, transparent, transparent 99px, rgba(71, 85, 105, 0.15) 100px)
+          `,
           backgroundSize: "cover",
           backgroundPosition: "center",
-          filter: "contrast(1.1) brightness(0.9)",
         };
     }
   };

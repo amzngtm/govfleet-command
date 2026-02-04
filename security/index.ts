@@ -9,7 +9,6 @@ export * from "./AuthContext";
 export type { SanitizedResult } from "./sanitization";
 export * from "./sanitization";
 export * from "./auditLogger";
-export * from "./securityHeaders";
 
 // Security configuration
 export const SECURITY_CONFIG = {
