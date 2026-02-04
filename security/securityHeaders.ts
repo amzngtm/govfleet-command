@@ -6,11 +6,15 @@
 // Content Security Policy - strict configuration for government applications
 export const CSP_POLICY = {
   "default-src": ["'self'"],
-  "script-src": ["'self'", "'unsafe-inline'"],
+  "script-src": ["'self'", "'unsafe-inline'", "https://esm.sh"],
   "style-src": ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com"],
   "img-src": ["'self'", "data:", "https:", "https://i.pravatar.cc"],
-  "connect-src": ["'self'", "https://api.gemini.googleapis.com"],
-  "font-src": ["'self'", "data:"],
+  "connect-src": [
+    "'self'",
+    "https://api.gemini.googleapis.com",
+    "https://*.gemini.googleapis.com",
+  ],
+  "font-src": ["'self'", "data:", "https://fonts.googleapis.com"],
   "object-src": ["'none'"],
   "frame-ancestors": ["'none'"],
   "form-action": ["'self'"],
