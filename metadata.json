@@ -1,0 +1,8 @@
+{
+  "name": "GovFleet Command",
+  "description": "Secure government-grade fleet command platform for real-time tracking, dispatch, and mission operations.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}

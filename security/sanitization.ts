@@ -1,0 +1,227 @@
+/**
+ * Input Sanitization and XSS Protection
+ */
+
+export interface SanitizedResult {
+  value: string;
+  isValid: boolean;
+  sanitizedValue: string;
+  errorMessage?: string;
+}
+
+const XSS_PATTERNS = [/<script/gi, /javascript:/gi, /on\w+=/gi];
+const SQL_PATTERNS = [/union/gi];
+
+function escapeHtml(s: string): string {
+  return s
+    .split(String.fromCharCode(38))
+    .join(String.fromCharCode(38, 97, 109, 112))
+    .split(String.fromCharCode(60))
+    .join(String.fromCharCode(38, 108, 116))
+    .split(String.fromCharCode(62))
+    .join(String.fromCharCode(38, 103, 116))
+    .split(String.fromCharCode(34))
+    .join(String.fromCharCode(38, 113, 117, 111, 116))
+    .split(String.fromCharCode(39))
+    .join(String.fromCharCode(38, 35, 120, 50, 55, 59))
+    .split(String.fromCharCode(47))
+    .join(String.fromCharCode(38, 35, 120, 50, 70, 59));
+}
+
+export function sanitizeString(input: string): SanitizedResult {
+  if (typeof input !== "string") {
+    return {
+      value: String(input),
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Invalid input type",
+    };
+  }
+  for (const pattern of XSS_PATTERNS) {
+    if (pattern.test(input)) {
+      return {
+        value: input,
+        isValid: false,
+        sanitizedValue: "",
+        errorMessage: "Potential XSS attack detected",
+      };
+    }
+  }
+  for (const pattern of SQL_PATTERNS) {
+    if (pattern.test(input)) {
+      console.warn("[SECURITY] Potential SQL injection attempt:", input);
+    }
+  }
+  return { value: input, isValid: true, sanitizedValue: escapeHtml(input) };
+}
+
+export function sanitizePhoneNumber(input: string): SanitizedResult {
+  const cleaned = input.replace(/\D/g, "");
+  if (cleaned.length < 10)
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Phone too short",
+    };
+  if (cleaned.length > 15)
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Phone too long",
+    };
+  return { value: input, isValid: true, sanitizedValue: cleaned };
+}
+
+export function sanitizeEmail(input: string): SanitizedResult {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(input))
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Invalid email",
+    };
+  return {
+    value: input,
+    isValid: true,
+    sanitizedValue: input.toLowerCase().trim(),
+  };
+}
+
+export function sanitizePlate(input: string): SanitizedResult {
+  const cleaned = input.replace(/[^a-zA-Z0-9\- ]/g, "").toUpperCase();
+  if (cleaned.length < 2 || cleaned.length > 10)
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Invalid plate",
+    };
+  return { value: input, isValid: true, sanitizedValue: cleaned };
+}
+
+export function sanitizeVIN(input: string): SanitizedResult {
+  const cleaned = input.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  if (cleaned.length !== 17)
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "VIN must be 17 chars",
+    };
+  return { value: input, isValid: true, sanitizedValue: cleaned };
+}
+
+export function sanitizeCoordinate(input: string): SanitizedResult {
+  const num = parseFloat(input);
+  if (isNaN(num) || !isFinite(num))
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Invalid coordinate",
+    };
+  return { value: input, isValid: true, sanitizedValue: num.toString() };
+}
+
+export function sanitizeForDisplay(input: string): string {
+  return escapeHtml(input);
+}
+
+export function stripHTML(input: string): string {
+  return input.replace(/<[^>]*>/g, "");
+}
+
+export function validateLength(
+  input: string,
+  min = 0,
+  max = 1000,
+): SanitizedResult {
+  if (input.length < min)
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: "",
+      errorMessage: "Too short",
+    };
+  if (input.length > max)
+    return {
+      value: input,
+      isValid: false,
+      sanitizedValue: input.substring(0, max),
+      errorMessage: "Too long",
+    };
+  return { value: input, isValid: true, sanitizedValue: input };
+}
+
+export function sanitizeForLogging<T extends Record<string, unknown>>(
+  obj: T,
+  sensitiveFields?: string[],
+): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  const fields =
+    sensitiveFields && sensitiveFields.length > 0
+      ? sensitiveFields
+      : ["password", "token", "key", "secret", "ssn", "phone"];
+  for (const [key, value] of Object.entries(obj)) {
+    const lowerKey = key.toLowerCase();
+    if (fields.some((f) => lowerKey.includes(f.toLowerCase()))) {
+      sanitized[key] = "***REDACTED***";
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      sanitized[key] = sanitizeForLogging(
+        value as Record<string, unknown>,
+        fields,
+      );
+    } else if (Array.isArray(value)) {
+      sanitized[key] = value.map((item) =>
+        typeof item === "object" && item !== null
+          ? sanitizeForLogging(item as Record<string, unknown>, fields)
+          : item,
+      );
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+export function validateFormField(
+  value: string,
+  fieldType: string,
+  options?: { minLength?: number; maxLength?: number },
+): SanitizedResult {
+  switch (fieldType) {
+    case "email":
+      return sanitizeEmail(value);
+    case "phone":
+      return sanitizePhoneNumber(value);
+    case "plate":
+      return sanitizePlate(value);
+    case "vin":
+      return sanitizeVIN(value);
+    case "coordinate":
+      return sanitizeCoordinate(value);
+    case "password":
+      if (value.length < 8)
+        return {
+          value,
+          isValid: false,
+          sanitizedValue: "",
+          errorMessage: "Password too short",
+        };
+      return { value, isValid: true, sanitizedValue: value };
+    default:
+      const check = validateLength(
+        value,
+        options?.minLength,
+        options?.maxLength,
+      );
+      return check.isValid ? sanitizeString(value) : check;
+  }
+}

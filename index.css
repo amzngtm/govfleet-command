@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+  --color-gov-900: #0f172a;
+  --color-gov-800: #1e293b;
+  --color-gov-700: #334155;
+  --color-gov-accent: #0ea5e9;
+  --color-gov-warning: #f59e0b;
+  --color-gov-danger: #ef4444;
+  --color-gov-success: #10b981;
+
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* Custom Scrollbar for a technical feel */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+body {
+  background-color: #0f172a; /* Slate 900 */
+  color: #f1f5f9; /* Slate 100 */
+}
