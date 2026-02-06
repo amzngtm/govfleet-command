@@ -44,7 +44,7 @@ export const PWAService = {
   // Register service worker
   registerServiceWorker:
     async (): Promise<ServiceWorkerRegistration | null> => {
-      if (typeof window === "undefined") return false;
+      if (typeof window === "undefined") return null;
       if (!("serviceWorker" in navigator)) {
         console.log("[PWA] Service Worker not supported");
         return null;
@@ -161,19 +161,39 @@ export const PWAService = {
       data: any;
     }): Promise<void> => {
       const db = await openDB();
-      await db.put("sync-queue", item);
+      const transaction = db.transaction(["sync-queue"], "readwrite");
+      const store = transaction.objectStore("sync-queue");
+      await new Promise<void>((resolve, reject) => {
+        const request = store.put(item);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
     },
 
     getAll: async (): Promise<
       Array<{ id: string; type: string; data: any }>
     > => {
       const db = await openDB();
-      return db.getAll("sync-queue");
+      const transaction = db.transaction(["sync-queue"], "readonly");
+      const store = transaction.objectStore("sync-queue");
+      return new Promise<Array<{ id: string; type: string; data: any }>>(
+        (resolve, reject) => {
+          const request = store.getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        },
+      );
     },
 
     remove: async (id: string): Promise<void> => {
       const db = await openDB();
-      await db.delete("sync-queue", id);
+      const transaction = db.transaction(["sync-queue"], "readwrite");
+      const store = transaction.objectStore("sync-queue");
+      await new Promise<void>((resolve, reject) => {
+        const request = store.delete(id);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
     },
 
     process: async (): Promise<void> => {
@@ -292,10 +312,10 @@ export const usePWA = () => {
     setIsStandalone(PWAService.isStandalone());
 
     // Listen for install prompt
-    const handleBeforeInstallPrompt = (e: Event) => {
+    const handleBeforeInstallPrompt = async (e: Event) => {
       e.preventDefault();
       (window as Record<string, any>).deferredPrompt = e;
-      setInstallPrompt(PWAService.requestInstallPrompt());
+      setInstallPrompt(await PWAService.requestInstallPrompt());
     };
 
     // Listen for update

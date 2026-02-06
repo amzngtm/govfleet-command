@@ -237,7 +237,7 @@ export class NotificationService {
       tag: "critical",
       requireInteraction: true,
       vibrate: [200, 100, 200],
-    });
+    } as NotificationOptions);
   }
 }
 

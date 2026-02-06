@@ -289,7 +289,7 @@ const TacticalMap: React.FC<TacticalMapProps> = ({
         <div
           key={vehicle.id}
           onClick={() => onVehicleSelect(vehicle)}
-          className={`absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-all duration-[2000ms] ease-linear hover:scale-110 group z-30`}
+          className={`absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-all duration-2000 ease-linear hover:scale-110 group z-30`}
           style={{
             left: `${vehicle.location.x}%`,
             top: `${vehicle.location.y}%`,
@@ -332,7 +332,7 @@ const TacticalMap: React.FC<TacticalMapProps> = ({
 
             {/* Label (Visible on hover or selected) */}
             <div
-              className={`absolute left-8 top-[-10px] bg-gov-900/95 backdrop-blur border border-gov-600 p-2.5 rounded-lg text-xs whitespace-nowrap z-40 min-w-[140px] shadow-2xl
+              className={`absolute left-8 -top-2.5 bg-gov-900/95 backdrop-blur border border-gov-600 p-2.5 rounded-lg text-xs whitespace-nowrap z-40 min-w-35 shadow-2xl
                 ${selectedVehicleId === vehicle.id ? "opacity-100 scale-100 translate-x-0" : "opacity-0 scale-90 -translate-x-2 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-x-0"} 
                 origin-left transition-all duration-200 pointer-events-none`}
             >
