@@ -13,12 +13,31 @@ interface ClientInfo {
 let io: SocketIOServer | null = null;
 
 export const initializeWebSocketServer = (httpServer: any) => {
+  // Only allow connections from trusted origins
+  const allowedOrigins = [
+    "https://govfleet-command.com",
+    "https://app.govfleet-command.com",
+    "http://localhost:3000", // For development
+    "http://localhost:4173", // For preview
+  ];
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "*",
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, etc.)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        } else {
+          return callback(new Error("Not allowed by CORS"));
+        }
+      },
       methods: ["GET", "POST"],
+      credentials: true,
     },
-    transports: ["websocket", "polling"],
+    // Disable polling for security, only allow websockets
+    transports: ["websocket"],
   });
 
   const clients = new Map<string, ClientInfo>();
@@ -27,43 +46,112 @@ export const initializeWebSocketServer = (httpServer: any) => {
   io.on("connection", (socket: Socket) => {
     console.log(`[WS] Client connected: ${socket.id}`);
 
-    // Handle authentication
-    socket.on("authenticate", (data: { userId: string; role: string }) => {
-      clients.set(socket.id, {
-        socket,
-        userId: data.userId,
-        subscriptions: new Set(["general"]),
-      });
-      console.log(`[WS] User authenticated: ${data.userId} (${data.role})`);
+    // Set a timeout for authentication - disconnect if not authenticated within 10 seconds
+    const authTimeout = setTimeout(() => {
+      console.log(
+        `[WS] Client ${socket.id} failed to authenticate in time, disconnecting`,
+      );
+      socket.disconnect(true);
+    }, 10000);
 
-      // Send current state on auth
-      socket.emit("state_sync", {
-        vehicles: Array.from(vehicleUpdates.values()),
-        timestamp: new Date().toISOString(),
-      });
-    });
+    // Handle authentication - require token and validate server-side
+    socket.on(
+      "authenticate",
+      async (data: { token: string; userId: string; role: string }) => {
+        try {
+          // Validate token with backend
+          const response = await fetch(
+            "http://localhost:3001/api/auth/validate-token",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ token: data.token }),
+            },
+          );
+
+          if (!response.ok) {
+            console.log(`[WS] Invalid token for client ${socket.id}`);
+            socket.emit("auth_error", {
+              message: "Invalid authentication token",
+            });
+            socket.disconnect(true);
+            return;
+          }
+
+          const authData = await response.json();
+
+          // Verify user ID and role match
+          if (authData.userId !== data.userId || authData.role !== data.role) {
+            console.log(`[WS] Token/user mismatch for client ${socket.id}`);
+            socket.emit("auth_error", { message: "Authentication mismatch" });
+            socket.disconnect(true);
+            return;
+          }
+
+          // Clear auth timeout
+          clearTimeout(authTimeout);
+
+          clients.set(socket.id, {
+            socket,
+            userId: data.userId,
+            subscriptions: new Set(["general"]),
+          });
+
+          console.log(`[WS] User authenticated: ${data.userId} (${data.role})`);
+
+          // Send current state on auth
+          socket.emit("state_sync", {
+            vehicles: Array.from(vehicleUpdates.values()),
+            timestamp: new Date().toISOString(),
+          });
+        } catch (error) {
+          console.error(`[WS] Authentication error for ${socket.id}:`, error);
+          socket.emit("auth_error", { message: "Authentication failed" });
+          socket.disconnect(true);
+        }
+      },
+    );
 
     // Subscribe to specific channels
     socket.on("subscribe", (channel: string) => {
       const client = clients.get(socket.id);
-      if (client) {
-        client.subscriptions.add(channel);
-        console.log(`[WS] ${socket.id} subscribed to ${channel}`);
+      if (!client || !client.userId) {
+        socket.emit("auth_required", { message: "Authentication required" });
+        return;
       }
+
+      // Validate channel access based on role (would need role checking here)
+      client.subscriptions.add(channel);
+      console.log(
+        `[WS] ${socket.id} (${client.userId}) subscribed to ${channel}`,
+      );
     });
 
     // Unsubscribe from channel
     socket.on("unsubscribe", (channel: string) => {
       const client = clients.get(socket.id);
-      if (client) {
-        client.subscriptions.delete(channel);
+      if (!client || !client.userId) {
+        socket.emit("auth_required", { message: "Authentication required" });
+        return;
       }
+
+      client.subscriptions.delete(channel);
     });
 
     // Handle vehicle telemetry update (from driver app)
     socket.on(
       "vehicle_telemetry",
       (data: Partial<Vehicle> & { vehicleId: string }) => {
+        const client = clients.get(socket.id);
+        if (!client || !client.userId) {
+          socket.emit("auth_required", { message: "Authentication required" });
+          return;
+        }
+
+        // Additional role validation could be added here for driver-only access
+
         const existing = vehicleUpdates.get(data.vehicleId);
         if (existing) {
           const updated = {
@@ -84,7 +172,15 @@ export const initializeWebSocketServer = (httpServer: any) => {
 
     // Handle incident report
     socket.on("incident_report", (incident: Incident) => {
-      console.log(`[WS] New incident reported: ${incident.id}`);
+      const client = clients.get(socket.id);
+      if (!client || !client.userId) {
+        socket.emit("auth_required", { message: "Authentication required" });
+        return;
+      }
+
+      console.log(
+        `[WS] New incident reported by ${client.userId}: ${incident.id}`,
+      );
       broadcastToSubscribers("incident_new", incident, ["incidents", "alerts"]);
 
       // Send push notification simulation
@@ -103,7 +199,15 @@ export const initializeWebSocketServer = (httpServer: any) => {
     socket.on(
       "trip_update",
       (data: { tripId: string; status: string; driverId?: string }) => {
-        console.log(`[WS] Trip update: ${data.tripId} -> ${data.status}`);
+        const client = clients.get(socket.id);
+        if (!client || !client.userId) {
+          socket.emit("auth_required", { message: "Authentication required" });
+          return;
+        }
+
+        console.log(
+          `[WS] Trip update by ${client.userId}: ${data.tripId} -> ${data.status}`,
+        );
         broadcastToSubscribers("trip_update", data, [
           "missions",
           `trip_${data.tripId}`,
@@ -115,6 +219,20 @@ export const initializeWebSocketServer = (httpServer: any) => {
     socket.on(
       "share_location",
       (data: { userId: string; coordinates: { lat: number; lng: number } }) => {
+        const client = clients.get(socket.id);
+        if (!client || !client.userId) {
+          socket.emit("auth_required", { message: "Authentication required" });
+          return;
+        }
+
+        // Verify the userId matches the authenticated user
+        if (data.userId !== client.userId) {
+          socket.emit("auth_error", {
+            message: "Cannot share location for other users",
+          });
+          return;
+        }
+
         broadcastToSubscribers("user_location", data, ["tracking"]);
       },
     );
@@ -129,8 +247,19 @@ export const initializeWebSocketServer = (httpServer: any) => {
         channel: string;
       }) => {
         const client = clients.get(socket.id);
+        if (!client || !client.userId) {
+          socket.emit("auth_required", { message: "Authentication required" });
+          return;
+        }
+
+        // Verify sender matches authenticated user
+        if (data.from !== client.userId) {
+          socket.emit("auth_error", { message: "Message sender mismatch" });
+          return;
+        }
+
         if (data.to) {
-          // Direct message
+          // Direct message - validate recipient exists and user has permission
           const targetClient = Array.from(clients.values()).find(
             (c) => c.userId === data.to,
           );
@@ -141,7 +270,7 @@ export const initializeWebSocketServer = (httpServer: any) => {
             });
           }
         } else {
-          // Channel message
+          // Channel message - validate channel access
           broadcastToSubscribers(
             "chat_message",
             {

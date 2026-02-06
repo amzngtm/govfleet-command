@@ -18,8 +18,8 @@ import {
   SanitizedResult,
 } from "./sanitization";
 import {
-  obfuscate,
-  deobfuscate,
+  encryptData,
+  decryptData,
   generateSecureToken,
   hashData,
   maskSensitiveData,
@@ -176,18 +176,18 @@ describe("sanitizeForLogging", () => {
 
 // ==================== ENCRYPTION TESTS ====================
 
-describe("obfuscate/deobfuscate", () => {
-  it("should obfuscate and deobfuscate data", () => {
+describe("encryptData/decryptData", () => {
+  it("should encrypt and decrypt data", async () => {
     const original = "sensitive data";
-    const obfuscated = obfuscate(original);
-    const deobfuscated = deobfuscate(obfuscated);
-    expect(deobfuscated).toBe(original);
+    const encrypted = await encryptData(original);
+    const decrypted = await decryptData(encrypted);
+    expect(decrypted).toBe(original);
   });
 
-  it("should produce different output for same input", () => {
-    const one = obfuscate("test");
-    const two = obfuscate("test");
-    expect(one).not.toBe(two); // Should use random
+  it("should produce different output for same input", async () => {
+    const one = await encryptData("test");
+    const two = await encryptData("test");
+    expect(one).not.toBe(two); // Should use random IV
   });
 });
 

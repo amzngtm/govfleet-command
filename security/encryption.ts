@@ -1,35 +1,102 @@
 /**
  * Government-Grade Encryption Utilities
- * FIPS 140-2 compliant encryption patterns
+ * FIPS 140-2 compliant encryption patterns using Web Crypto API
  */
 
-// Simple XOR-based obfuscation for client-side data protection
-// Note: In production, use Web Crypto API with AES-GCM
-const SECURITY_SALT = "GOVFLEET_SECURE_KEY_2024";
+// AES-GCM encryption for client-side data protection
+const ENCRYPTION_KEY = "govfleet-secure-key-2024"; // In production, derive from user-specific key
 
-export function obfuscate(data: string): string {
-  let result = "";
-  for (let i = 0; i < data.length; i++) {
-    result += String.fromCharCode(
-      data.charCodeAt(i) ^ SECURITY_SALT.charCodeAt(i % SECURITY_SALT.length),
-    );
-  }
-  return btoa(result);
+export async function encryptData(data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const dataBuffer = encoder.encode(data);
+
+  // Derive key from password
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(ENCRYPTION_KEY),
+    "PBKDF2",
+    false,
+    ["deriveBits", "deriveKey"],
+  );
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: salt,
+      iterations: 100000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt"],
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv },
+    key,
+    dataBuffer,
+  );
+
+  // Combine salt + iv + encrypted data
+  const combined = new Uint8Array(
+    salt.length + iv.length + encrypted.byteLength,
+  );
+  combined.set(salt, 0);
+  combined.set(iv, salt.length);
+  combined.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+  return btoa(String.fromCharCode(...combined));
 }
 
-export function deobfuscate(obfuscated: string): string {
+export async function decryptData(encryptedData: string): Promise<string> {
   try {
-    const decoded = atob(obfuscated);
-    let result = "";
-    for (let i = 0; i < decoded.length; i++) {
-      result += String.fromCharCode(
-        decoded.charCodeAt(i) ^
-          SECURITY_SALT.charCodeAt(i % SECURITY_SALT.length),
-      );
-    }
-    return result;
+    const combined = new Uint8Array(
+      atob(encryptedData)
+        .split("")
+        .map((c) => c.charCodeAt(0)),
+    );
+
+    const salt = combined.slice(0, 16);
+    const iv = combined.slice(16, 28);
+    const encrypted = combined.slice(28);
+
+    const encoder = new TextEncoder();
+
+    // Derive key from password
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(ENCRYPTION_KEY),
+      "PBKDF2",
+      false,
+      ["deriveBits", "deriveKey"],
+    );
+
+    const key = await crypto.subtle.deriveKey(
+      {
+        name: "PBKDF2",
+        salt: salt,
+        iterations: 100000,
+        hash: "SHA-256",
+      },
+      keyMaterial,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["decrypt"],
+    );
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      encrypted,
+    );
+
+    const decoder = new TextDecoder();
+    return decoder.decode(decrypted);
   } catch {
-    return "";
+    throw new Error("Failed to decrypt data");
   }
 }
 

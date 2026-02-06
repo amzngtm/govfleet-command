@@ -11,12 +11,7 @@ import React, {
   useCallback,
 } from "react";
 import { UserProfile, UserRole } from "../types";
-import {
-  generateSecureToken,
-  obfuscate,
-  deobfuscate,
-  hashData,
-} from "./encryption";
+import { generateSecureToken, hashData } from "./encryption";
 
 // Session configuration
 const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes for government standard
@@ -53,40 +48,6 @@ interface AuthContextType extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
-
-// Mock credentials for demo (in production, validate against secure backend)
-const VALID_CREDENTIALS: Record<
-  string,
-  { passwordHash: string; user: Partial<UserProfile> }
-> = {
-  "sarah.c@govfleet.mil": {
-    passwordHash: hashData("Admin123!"),
-    user: {
-      id: "u1",
-      name: "Cmdr. Sarah Connor",
-      role: UserRole.SUPER_ADMIN,
-      codename: "Valkyrie",
-    },
-  },
-  "miller@ops.gov": {
-    passwordHash: hashData("Dispatch123!"),
-    user: {
-      id: "disp1",
-      name: "Ops. Chief Miller",
-      role: UserRole.DISPATCHER,
-      codename: "Watchtower",
-    },
-  },
-  "smith@ops.gov": {
-    passwordHash: hashData("Driver123!"),
-    user: {
-      id: "d1",
-      name: "Agent Smith",
-      role: UserRole.DRIVER,
-      codename: "Neo",
-    },
-  },
-};
 
 export const AuthProvider: React.FC<{
   children: React.ReactNode;
@@ -161,89 +122,56 @@ export const AuthProvider: React.FC<{
 
   const login = useCallback(
     async (credentials: LoginCredentials): Promise<boolean> => {
-      // Check lockout
-      if (authState.isLockedOut) {
-        const remaining = Math.ceil(
-          (authState.lockoutExpires! - Date.now()) / 60000,
-        );
-        alert(`Account locked. Try again in ${remaining} minutes.`);
-        return false;
-      }
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include", // Include cookies
+          body: JSON.stringify(credentials),
+        });
 
-      // Validate credentials
-      const validCred = VALID_CREDENTIALS[credentials.email];
-      if (
-        !validCred ||
-        validCred.passwordHash !== hashData(credentials.password)
-      ) {
-        const newAttempts = authState.loginAttempts + 1;
-        const isLocked = newAttempts >= MAX_LOGIN_ATTEMPTS;
-
-        setAuthState((prev) => ({
-          ...prev,
-          loginAttempts: newAttempts,
-          isLockedOut: isLocked,
-          lockoutExpires: isLocked ? Date.now() + LOCKOUT_DURATION_MS : null,
-        }));
-
-        if (isLocked) {
-          alert(`Too many failed attempts. Account locked for 30 minutes.`);
-        } else {
-          alert(
-            `Invalid credentials. ${MAX_LOGIN_ATTEMPTS - newAttempts} attempts remaining.`,
-          );
+        if (!response.ok) {
+          const errorData = await response.json();
+          alert(errorData.message || "Login failed");
+          return false;
         }
+
+        const data = await response.json();
+
+        // Set user from response (server should validate and return user data)
+        setAuthState({
+          isAuthenticated: true,
+          user: data.user,
+          sessionToken: data.token || null, // May not need client-side token if using cookies
+          lastActivity: Date.now(),
+          loginAttempts: 0,
+          isLockedOut: false,
+          lockoutExpires: null,
+        });
+
+        return true;
+      } catch (error) {
+        console.error("Login error:", error);
+        alert("Login failed. Please try again.");
         return false;
       }
-
-      // Find full user profile
-      const fullUser = users.find((u) => u.email === credentials.email);
-      if (!fullUser) {
-        alert("User not found in system.");
-        return false;
-      }
-
-      // Generate secure session
-      const sessionToken = generateSecureToken(64);
-
-      // Store encrypted session
-      const encryptedSession = obfuscate(
-        JSON.stringify({
-          token: sessionToken,
-          userId: fullUser.id,
-          timestamp: Date.now(),
-        }),
-      );
-      sessionStorage.setItem("govfleet_session", encryptedSession);
-
-      setAuthState({
-        isAuthenticated: true,
-        user: fullUser,
-        sessionToken,
-        lastActivity: Date.now(),
-        loginAttempts: 0,
-        isLockedOut: false,
-        lockoutExpires: null,
-      });
-
-      // Log authentication event
-      console.log(
-        `[SECURITY] User ${fullUser.name} authenticated at ${new Date().toISOString()}`,
-      );
-
-      return true;
     },
-    [
-      authState.loginAttempts,
-      authState.isLockedOut,
-      authState.lockoutExpires,
-      users,
-    ],
+    [],
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     const userName = authState.user?.name || "Unknown";
-    sessionStorage.removeItem("govfleet_session");
+
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
 
     setAuthState({
       isAuthenticated: false,
@@ -258,7 +186,7 @@ export const AuthProvider: React.FC<{
     console.log(
       `[SECURITY] User ${userName} logged out at ${new Date().toISOString()}`,
     );
-  }, [authState.user]);
+  }, []);
 
   const extendSession = useCallback(() => {
     if (authState.isAuthenticated) {

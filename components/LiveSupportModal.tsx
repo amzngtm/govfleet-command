@@ -78,19 +78,39 @@ const LiveSupportModal: React.FC<LiveSupportModalProps> = ({
 
   // Refs for Audio Management
   const audioContextRef = useRef<AudioContext | null>(null);
+  const inputAudioContextRef = useRef<AudioContext | null>(null);
   const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const outputNodeRef = useRef<GainNode | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const sessionRef = useRef<any>(null);
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  // Initialize Gemini Client
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  // Audio session management with backend
 
   const startSession = async () => {
     try {
       setError(null);
+
+      // Start session with backend
+      const response = await fetch("/api/live-support/start-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          userRole,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to start live support session");
+      }
+
+      const sessionData = await response.json();
+
       // 1. Setup Audio Context
       const AudioContextClass =
         window.AudioContext || (window as any).webkitAudioContext;
@@ -98,103 +118,51 @@ const LiveSupportModal: React.FC<LiveSupportModalProps> = ({
       const inputCtx = new AudioContextClass({ sampleRate: 16000 });
 
       audioContextRef.current = audioCtx;
+      inputAudioContextRef.current = inputCtx;
       const outputNode = audioCtx.createGain();
       outputNode.connect(audioCtx.destination);
       outputNodeRef.current = outputNode;
 
       // 2. Get User Media
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
 
-      // 3. Connect to Gemini Live
-      const sessionPromise = ai.live.connect({
-        model: "gemini-2.5-flash-native-audio-preview-12-2025",
-        callbacks: {
-          onopen: () => {
-            setIsConnected(true);
+      // 3. Connect to backend for audio streaming
+      setIsConnected(true);
 
-            // Start streaming Input
-            const source = inputCtx.createMediaStreamSource(stream);
-            const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+      // Start streaming Input to backend
+      const source = inputCtx.createMediaStreamSource(stream);
+      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
 
-            processor.onaudioprocess = (e) => {
-              if (isMuted) return;
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBlob = createBlob(inputData);
-              sessionPromise.then((session) =>
-                session.sendRealtimeInput({ media: pcmBlob }),
-              );
-            };
+      processor.onaudioprocess = (e) => {
+        if (isMuted) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcmBlob = createBlob(inputData);
 
-            source.connect(processor);
-            processor.connect(inputCtx.destination);
-
-            inputSourceRef.current = source;
-            processorRef.current = processor;
+        // Send audio data to backend
+        fetch("/api/live-support/audio-input", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
-          onmessage: async (msg: LiveServerMessage) => {
-            // Handle Audio Output
-            const audioData =
-              msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            if (audioData) {
-              setIsSpeaking(true);
-              const audioCtx = audioContextRef.current;
-              if (audioCtx) {
-                nextStartTimeRef.current = Math.max(
-                  nextStartTimeRef.current,
-                  audioCtx.currentTime,
-                );
+          credentials: "include",
+          body: JSON.stringify({
+            sessionId: sessionData.sessionId,
+            audioData: pcmBlob,
+          }),
+        }).catch((error) => {
+          console.error("Failed to send audio data:", error);
+        });
+      };
 
-                const buffer = await decodeAudioData(
-                  decode(audioData),
-                  audioCtx,
-                  24000,
-                  1,
-                );
-                const source = audioCtx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(outputNodeRef.current!);
+      source.connect(processor);
+      processor.connect(inputCtx.destination);
 
-                source.addEventListener("ended", () => {
-                  sourcesRef.current.delete(source);
-                  if (sourcesRef.current.size === 0) setIsSpeaking(false);
-                });
+      inputSourceRef.current = source;
+      processorRef.current = processor;
 
-                source.start(nextStartTimeRef.current);
-                nextStartTimeRef.current += buffer.duration;
-                sourcesRef.current.add(source);
-              }
-            }
-
-            if (msg.serverContent?.interrupted) {
-              sourcesRef.current.forEach((s) => s.stop());
-              sourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
-              setIsSpeaking(false);
-            }
-          },
-          onclose: () => {
-            setIsConnected(false);
-          },
-          onerror: (e) => {
-            console.error(e);
-            setError("Secure link failed. Retrying...");
-            setIsConnected(false);
-          },
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } },
-          },
-          systemInstruction: `You are 'Overwatch', a secure military-grade fleet support AI for GovFleet. 
-          User Role: ${userRole}. 
-          Keep responses concise, professional, and tactical. 
-          Use terms like 'Copy', 'Affirmative', 'Standby'. 
-          If asked about status, invent a realistic situational report.`,
-        },
-      });
-
-      sessionRef.current = sessionPromise;
+      // Store session info
+      sessionRef.current = sessionData.sessionId;
     } catch (err) {
       console.error(err);
       setError("Microphone access denied or network error.");
@@ -202,25 +170,95 @@ const LiveSupportModal: React.FC<LiveSupportModalProps> = ({
   };
 
   const stopSession = async () => {
+    // Stop all audio sources
+    sourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+        source.disconnect();
+      } catch (e) {
+        // Source might already be stopped
+      }
+    });
+    sourcesRef.current.clear();
+
+    // Disconnect and clean up processor
     if (processorRef.current) {
-      processorRef.current.disconnect();
+      try {
+        processorRef.current.disconnect();
+      } catch (e) {
+        // Might already be disconnected
+      }
       processorRef.current = null;
     }
+
+    // Disconnect and clean up input source
     if (inputSourceRef.current) {
-      inputSourceRef.current.disconnect();
+      try {
+        inputSourceRef.current.disconnect();
+      } catch (e) {
+        // Might already be disconnected
+      }
       inputSourceRef.current = null;
     }
+
+    // Stop and close input audio context
+    if (inputAudioContextRef.current) {
+      try {
+        await inputAudioContextRef.current.close();
+      } catch (e) {
+        // Might already be closed
+      }
+      inputAudioContextRef.current = null;
+    }
+
+    // Disconnect output node
+    if (outputNodeRef.current) {
+      try {
+        outputNodeRef.current.disconnect();
+      } catch (e) {
+        // Might already be disconnected
+      }
+      outputNodeRef.current = null;
+    }
+
+    // Stop and close output audio context
     if (audioContextRef.current) {
-      audioContextRef.current.close();
+      try {
+        await audioContextRef.current.close();
+      } catch (e) {
+        // Might already be closed
+      }
       audioContextRef.current = null;
     }
 
+    // Stop media stream tracks
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => {
+        track.stop();
+      });
+      mediaStreamRef.current = null;
+    }
+
+    // Notify backend to end session
     if (sessionRef.current) {
-      const session = await sessionRef.current;
-      session.close();
+      try {
+        await fetch("/api/live-support/end-session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            sessionId: sessionRef.current,
+          }),
+        });
+      } catch (error) {
+        console.error("Failed to end session:", error);
+      }
       sessionRef.current = null;
     }
 
+    // Reset state
     setIsConnected(false);
     setIsSpeaking(false);
   };
